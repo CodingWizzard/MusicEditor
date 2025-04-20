@@ -10,6 +10,8 @@ class MusicScoreEditor {
         this.playbackLine = null;
         this.playbackStartPosition = -5; // Startposition links
         this.playbackEndPosition = 5;    // Endposition rechts
+        this.secondsPerUnit = 1; // Zeit pro Einheit auf der X-Achse
+        this.maxImportDuration = 5; // Maximale Importdauer in Sekunden
 
         // Transport initialisieren
         Tone.Transport.bpm.value = this.tempo;
@@ -173,16 +175,18 @@ class MusicScoreEditor {
     }
 
     createNote(position) {
-        // Note als 3D-Objekt erstellen
         const noteHead = BABYLON.MeshBuilder.CreateSphere("noteHead", {
             diameter: 0.15
         }, this.scene);
 
+        // Material für die Note
+        const noteMaterial = new BABYLON.StandardMaterial("noteMaterial", this.scene);
+        noteMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0); // Schwarz als Standardfarbe
+        noteHead.material = noteMaterial;
+
         noteHead.position = position;
 
         // Konvertiere y-Position zu Tonhöhe
-        // Wir haben 5 Linien mit Abstand 0.2, beginnend bei y=0
-        // Berechne die entsprechende Note basierend auf der y-Position
         const notePositions = {
             0: "F4",    // Erste Linie
             0.2: "A4",  // Zweite Linie
@@ -191,7 +195,6 @@ class MusicScoreEditor {
             0.8: "G5"   // Fünfte Linie
         };
 
-        // Finde die nächstgelegene Position
         let closestPosition = 0;
         let minDistance = Number.MAX_VALUE;
 
@@ -204,23 +207,19 @@ class MusicScoreEditor {
         }
 
         const pitch = notePositions[closestPosition];
-        const duration = "4n"; // Viertelnote als Standard
+        const duration = "4n";
 
-        // Note zum aktuellen Track hinzufügen
         const note = {
             mesh: noteHead,
             pitch: pitch,
             duration: duration,
-            position: position,
-            time: position.x + 5 // Konvertiere Position zu Zeit (offset von 5 wegen playbackStartPosition)
+            position: position
         };
 
         this.tracks[this.currentTrack].push(note);
+        this.tracks[this.currentTrack].sort((a, b) => a.position.x - b.position.x);
 
-        // Sortiere Noten nach Zeit
-        this.tracks[this.currentTrack].sort((a, b) => a.time - b.time);
-
-        console.log(`Created note ${pitch} at position y=${position.y}`);
+        console.log(`Created note ${pitch} at position x=${position.x}, y=${position.y}`);
         return note;
     }
 
@@ -257,59 +256,59 @@ class MusicScoreEditor {
             return;
         }
 
-        // Stop any existing playback
         this.stopPlayback();
-
         const track = this.tracks[trackIndex];
-        console.log("Playing track with", track.length, "notes");
 
-        // Calculate total duration
-        const duration = track[track.length - 1].time + 2; // Add 2 seconds buffer
+        const totalDistance = this.playbackEndPosition - this.playbackStartPosition;
+        const totalDuration = totalDistance * this.secondsPerUnit;
 
-        // Reset transport
+        // Reset transport and playback line
         Tone.Transport.cancel();
         Tone.Transport.stop();
+        this.updatePlaybackLine(this.playbackStartPosition);
+        this.playbackLine.setEnabled(true);
 
         // Schedule all notes
         track.forEach(note => {
+            const relativePosition = (note.position.x - this.playbackStartPosition) / totalDistance;
+            const noteTime = relativePosition * totalDuration;
+
             Tone.Transport.schedule((time) => {
-                console.log("Playing note", note.pitch, "at time", time);
+                // Highlight the note
+                const originalColor = note.mesh.material.diffuseColor;
+                note.mesh.material = new BABYLON.StandardMaterial("highlightMaterial", this.scene);
+                note.mesh.material.diffuseColor = new BABYLON.Color3(1, 0, 0);
+
                 this.sampler.triggerAttackRelease(note.pitch, note.duration, time);
-            }, note.time);
+
+                setTimeout(() => {
+                    note.mesh.material = new BABYLON.StandardMaterial("noteMaterial", this.scene);
+                    note.mesh.material.diffuseColor = originalColor;
+                }, 500);
+            }, noteTime);
         });
 
-        // Playback line animation
-        this.playbackLine.setEnabled(true);
-        const frameRate = 30;
-        const animation = new BABYLON.Animation(
-            "playbackAnimation",
-            "position.x",
-            frameRate,
-            BABYLON.Animation.ANIMATIONTYPE_FLOAT,
-            BABYLON.Animation.ANIMATIONLOOPMODE_RELATIVE
-        );
+        // Implementiere manuelle Animation statt BABYLON Animation
+        let startTime;
+        const animate = (currentTime) => {
+            if (!startTime) startTime = currentTime;
 
-        const keyFrames = [];
-        keyFrames.push({
-            frame: 0,
-            value: this.playbackStartPosition
-        });
-        keyFrames.push({
-            frame: frameRate * duration,
-            value: this.playbackEndPosition
-        });
+            const elapsedTime = (currentTime - startTime) / 1000; // Convert to seconds
+            const progress = Math.min(elapsedTime / totalDuration, 1);
 
-        animation.setKeys(keyFrames);
-        this.playbackLine.animations = [animation];
+            const newX = this.playbackStartPosition + (progress * totalDistance);
+            this.updatePlaybackLine(newX);
 
-        // Start animation and transport
-        this.scene.beginAnimation(this.playbackLine, 0, frameRate * duration, false, 1, () => {
-            this.stopPlayback();
-        });
+            if (progress < 1 && this.playbackLine.isEnabled()) {
+                requestAnimationFrame(animate);
+            } else {
+                this.stopPlayback();
+            }
+        };
 
-        // Ensure audio context is running and start transport
+        // Start playback
         Tone.start().then(() => {
-            console.log("Audio context started");
+            requestAnimationFrame(animate);
             Tone.Transport.start();
         });
     }
@@ -317,17 +316,188 @@ class MusicScoreEditor {
     stopPlayback() {
         Tone.Transport.stop();
         Tone.Transport.cancel();
-        this.scene.stopAnimation(this.playbackLine);
         this.playbackLine.setEnabled(false);
         this.updatePlaybackLine(this.playbackStartPosition);
     }
 
     exportToMidi() {
-        // MIDI Export Logik implementieren
+        // Erstelle neue MIDI-Datei
+        const midi = new Midi();
+
+        // Füge einen Track hinzu
+        const track = midi.addTrack();
+
+        // Setze Tempo
+        midi.header.setTempo(this.tempo);
+
+        // Konvertiere X-Position zu Ticks
+        const xToTicks = (x) => {
+            const normalizedPosition = (x - this.playbackStartPosition) /
+                (this.playbackEndPosition - this.playbackStartPosition);
+            return Math.round(normalizedPosition * midi.header.ticksPerBeat * 4); // 4 Beats pro Takt
+        };
+
+        // Konvertiere Y-Position zu MIDI Note
+        const yToMidiNote = (y) => {
+            const noteMapping = {
+                0.8: 65,  // F4
+                0.6: 69,  // A4
+                0.4: 72,  // C5
+                0.2: 76,  // E5
+                0.0: 79   // G5
+            };
+
+            let closestY = 0.4; // Default to C5
+            let minDistance = Number.MAX_VALUE;
+
+            for (const pos in noteMapping) {
+                const distance = Math.abs(y - pos);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestY = pos;
+                }
+            }
+
+            return noteMapping[closestY];
+        };
+
+        // Füge alle Noten zum Track hinzu
+        this.tracks[this.currentTrack].forEach(note => {
+            const ticks = xToTicks(note.position.x);
+            const midiNote = yToMidiNote(note.position.y);
+            const duration = 480; // Standard-Länge (ein Beat)
+
+            track.addNote({
+                midi: midiNote,
+                time: ticks / midi.header.ticksPerBeat,
+                duration: 0.5, // Halbe Note
+                velocity: 64 // Standard-Lautstärke
+            });
+        });
+
+        // Exportiere als Blob und erstelle Download
+        const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'score.mid';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     importFromMidi(file) {
-        // MIDI Import Logik implementieren
+        // Überprüfe, ob es sich um eine MIDI-Datei handelt
+        if (!file.name.toLowerCase().endsWith('.mid') && !file.name.toLowerCase().endsWith('.midi')) {
+            alert('Bitte wähle eine MIDI-Datei (.mid oder .midi) aus.');
+            return;
+        }
+
+        // Bestehende Noten löschen
+        this.tracks[this.currentTrack].forEach(note => {
+            note.mesh.dispose();
+        });
+        this.tracks[this.currentTrack] = [];
+
+        const reader = new FileReader();
+
+        reader.onerror = (error) => {
+            console.error('Fehler beim Lesen der MIDI-Datei:', error);
+            alert('Die MIDI-Datei konnte nicht gelesen werden.');
+        };
+
+        reader.onload = async (e) => {
+            try {
+                const buffer = new Uint8Array(e.target.result);
+                const midi = new Midi(buffer);
+
+                // Konvertiere Zeit in Sekunden zu Ticks
+                const secondsToTicks = (seconds) => {
+                    const bpm = midi.header.tempos[0]?.bpm || 120;
+                    const ticksPerBeat = midi.header.ticksPerBeat;
+                    return (seconds * bpm * ticksPerBeat) / 60;
+                };
+
+                const maxTicks = secondsToTicks(this.maxImportDuration);
+
+                // Konvertiere MIDI-Ticks zu X-Koordinaten
+                const ticksToX = (ticks) => {
+                    const normalizedPosition = ticks / maxTicks;
+                    return this.playbackStartPosition +
+                        (normalizedPosition * (this.playbackEndPosition - this.playbackStartPosition));
+                };
+
+                // Debug-Ausgaben
+                console.log('MIDI Header:', {
+                    ticksPerBeat: midi.header.ticksPerBeat,
+                    timeSignature: midi.header.timeSignatures[0],
+                    tempos: midi.header.tempos
+                });
+
+                // MIDI-Noten zu Y-Koordinaten konvertieren
+                const midiNoteToY = (midiNote) => {
+                    // MIDI-Noten zu unseren Notenlinien mappen
+                    const noteMapping = {
+                        65: 0.8,  // F4
+                        69: 0.6,  // A4
+                        72: 0.4,  // C5
+                        76: 0.2,  // E5
+                        79: 0.0   // G5
+                    };
+
+                    // Finde die nächstgelegene Note
+                    let closestNote = 72; // C5 als Standard
+                    let minDistance = Infinity;
+
+                    for (const note in noteMapping) {
+                        const distance = Math.abs(midiNote - note);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestNote = note;
+                        }
+                    }
+
+                    return noteMapping[closestNote];
+                };
+
+                // Verarbeite alle MIDI-Tracks
+                midi.tracks.forEach((track, trackIndex) => {
+                    if (!this.tracks[trackIndex]) {
+                        this.tracks[trackIndex] = [];
+                    }
+
+                    if (track.notes && track.notes.length > 0) {
+                        // Filtere Noten innerhalb der maximalen Dauer
+                        const filteredNotes = track.notes.filter(note => note.ticks <= maxTicks);
+
+                        filteredNotes.forEach(midiNote => {
+                            const x = ticksToX(midiNote.ticks);
+                            const y = midiNoteToY(midiNote.midi);
+
+                            if (!isNaN(x) && !isNaN(y)) {
+                                const position = new BABYLON.Vector3(x, y, 0);
+                                const note = this.createNote(position);
+                                note.duration = `${midiNote.duration}n`;
+                                note.velocity = midiNote.velocity;
+                            }
+                        });
+                    }
+                });
+
+                // Sortiere die Noten nach X-Position
+                this.tracks.forEach(track => {
+                    track.sort((a, b) => a.position.x - b.position.x);
+                });
+
+                console.log(`Imported MIDI file with ${midi.tracks.length} tracks`);
+            } catch (error) {
+                console.error('Fehler beim Verarbeiten der MIDI-Datei:', error);
+                alert('Die MIDI-Datei konnte nicht verarbeitet werden.');
+            }
+        };
+
+        reader.readAsArrayBuffer(file);
     }
 
     setupEventListeners() {
@@ -356,7 +526,16 @@ class MusicScoreEditor {
         };
 
         document.getElementById("exportMidi").onclick = () => this.exportToMidi();
-        document.getElementById("importMidi").onchange = (e) => this.importFromMidi(e.target.files[0]);
+        document.getElementById("importMidi").onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                this.importFromMidi(file);
+            }
+        };
+
+        document.getElementById("importDuration").onchange = (e) => {
+            this.setMaxImportDuration(parseFloat(e.target.value));
+        };
 
         // Render Loop
         this.engine.runRenderLoop(() => {
@@ -371,6 +550,7 @@ class MusicScoreEditor {
 
 // Editor initialisieren
 const editor = new MusicScoreEditor();
+
 
 
 
