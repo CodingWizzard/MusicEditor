@@ -32,7 +32,7 @@ class MusicScoreEditor {
             BABYLON.Vector3.Zero(),
             this.scene
         );
-        this.camera.attachControl(this.canvas, true);
+        // this.camera.attachControl(this.canvas, true);
 
         // Beleuchtung
         new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), this.scene);
@@ -188,11 +188,21 @@ class MusicScoreEditor {
 
         // Konvertiere y-Position zu Tonhöhe
         const notePositions = {
-            0: "F4",    // Erste Linie
-            0.2: "A4",  // Zweite Linie
-            0.4: "C5",  // Dritte Linie
-            0.6: "E5",  // Vierte Linie
-            0.8: "G5"   // Fünfte Linie
+            0.0: "F4",      // Erste Linie
+            0.1: "F#4",     // Zwischen F4 und A4
+            0.2: "G4",      // Zwischen F4 und A4
+            0.3: "G#4",     // Zwischen F4 und A4
+            0.4: "A4",      // Zweite Linie
+            0.5: "A#4",     // Zwischen A4 und C5
+            0.6: "B4",      // Zwischen A4 und C5
+            0.7: "C5",      // Dritte Linie
+            0.8: "C#5",     // Zwischen C5 und E5
+            0.9: "D5",      // Zwischen C5 und E5
+            1.0: "D#5",     // Zwischen C5 und E5
+            1.1: "E5",      // Vierte Linie
+            1.2: "F5",      // Zwischen E5 und G5
+            1.3: "F#5",     // Zwischen E5 und G5
+            1.4: "G5"       // Fünfte Linie
         };
 
         let closestPosition = 0;
@@ -340,14 +350,24 @@ class MusicScoreEditor {
         // Konvertiere Y-Position zu MIDI Note
         const yToMidiNote = (y) => {
             const noteMapping = {
-                0.8: 65,  // F4
-                0.6: 69,  // A4
-                0.4: 72,  // C5
-                0.2: 76,  // E5
-                0.0: 79   // G5
+                0.0: 65,    // F4
+                0.1: 66,    // F#4
+                0.2: 67,    // G4
+                0.3: 68,    // G#4
+                0.4: 69,    // A4
+                0.5: 70,    // A#4
+                0.6: 71,    // B4
+                0.7: 72,    // C5
+                0.8: 73,    // C#5
+                0.9: 74,    // D5
+                1.0: 75,    // D#5
+                1.1: 76,    // E5
+                1.2: 77,    // F5
+                1.3: 78,    // F#5
+                1.4: 79     // G5
             };
 
-            let closestY = 0.4; // Default to C5
+            let closestY = 0.7; // Default to C5
             let minDistance = Number.MAX_VALUE;
 
             for (const pos in noteMapping) {
@@ -437,24 +457,32 @@ class MusicScoreEditor {
 
                 // MIDI-Noten zu Y-Koordinaten konvertieren
                 const midiNoteToY = (midiNote) => {
-                    // MIDI-Noten zu unseren Notenlinien mappen
                     const noteMapping = {
-                        65: 0.8,  // F4
-                        69: 0.6,  // A4
-                        72: 0.4,  // C5
-                        76: 0.2,  // E5
-                        79: 0.0   // G5
+                        65: 0.0,    // F4
+                        66: 0.1,    // F#4
+                        67: 0.2,    // G4
+                        68: 0.3,    // G#4
+                        69: 0.4,    // A4
+                        70: 0.5,    // A#4
+                        71: 0.6,    // B4
+                        72: 0.7,    // C5
+                        73: 0.8,    // C#5
+                        74: 0.9,    // D5
+                        75: 1.0,    // D#5
+                        76: 1.1,    // E5
+                        77: 1.2,    // F5
+                        78: 1.3,    // F#5
+                        79: 1.4     // G5
                     };
 
-                    // Finde die nächstgelegene Note
-                    let closestNote = 72; // C5 als Standard
-                    let minDistance = Infinity;
+                    let closestNote = 72; // Default to C5
+                    let minDistance = Number.MAX_VALUE;
 
                     for (const note in noteMapping) {
                         const distance = Math.abs(midiNote - note);
                         if (distance < minDistance) {
                             minDistance = distance;
-                            closestNote = note;
+                            closestNote = parseInt(note);
                         }
                     }
 
@@ -501,15 +529,114 @@ class MusicScoreEditor {
     }
 
     setupEventListeners() {
-        // Maus-Events für Noteneingabe
+        let isDragging = false;
+        let selectedNote = null;
+
+        // Rechtsklick verhindern
+        this.canvas.addEventListener("contextmenu", (evt) => {
+            evt.preventDefault();
+        });
+
+        // Mausklick-Handler
         this.scene.onPointerDown = (evt, pickResult) => {
-            if (pickResult.hit) {
-                const position = pickResult.pickedPoint;
-                this.createNote(position);
+            if (evt.button === 2) { // Rechte Maustaste
+                if (pickResult.hit && pickResult.pickedMesh.name === "noteHead") {
+                    // Note aus dem Track entfernen
+                    this.tracks[this.currentTrack] = this.tracks[this.currentTrack].filter(note =>
+                        note.mesh !== pickResult.pickedMesh
+                    );
+                    // Mesh entfernen
+                    pickResult.pickedMesh.dispose();
+                }
+            } else if (evt.button === 0) { // Linke Maustaste
+                if (pickResult.hit) {
+                    if (pickResult.pickedMesh.name === "noteHead") {
+                        // Existierende Note auswählen zum Verschieben
+                        isDragging = true;
+                        selectedNote = this.tracks[this.currentTrack].find(note =>
+                            note.mesh === pickResult.pickedMesh
+                        );
+                    } else {
+                        // Neue Note erstellen
+                        const position = pickResult.pickedPoint;
+                        this.createNote(position);
+                    }
+                }
             }
         };
 
-        // UI Controls
+        // Mausbewegung-Handler
+        this.scene.onPointerMove = (evt, pickResult) => {
+            if (isDragging && selectedNote) {
+                const ray = this.scene.createPickingRay(
+                    this.scene.pointerX,
+                    this.scene.pointerY,
+                    BABYLON.Matrix.Identity(),
+                    this.camera
+                );
+
+                // Schnittpunkt mit der XY-Ebene berechnen
+                const plane = new BABYLON.Plane(0, 0, 1, 0);
+                let distance = ray.intersectsPlane(plane);
+
+                if (distance) {
+                    const newPosition = ray.origin.add(ray.direction.scale(distance));
+
+                    // Position auf den erlaubten Bereich beschränken
+                    const clampedX = Math.max(this.playbackStartPosition,
+                        Math.min(this.playbackEndPosition, newPosition.x));
+                    const clampedY = Math.max(0, Math.min(1.4, newPosition.y));
+
+                    // Position aktualisieren
+                    selectedNote.mesh.position.x = clampedX;
+                    selectedNote.mesh.position.y = clampedY;
+                    selectedNote.position = selectedNote.mesh.position;
+
+                    // Tonhöhe aktualisieren
+                    const notePositions = {
+                        0.0: "F4",      // Erste Linie
+                        0.1: "F#4",     // Zwischen F4 und A4
+                        0.2: "G4",      // Zwischen F4 und A4
+                        0.3: "G#4",     // Zwischen F4 und A4
+                        0.4: "A4",      // Zweite Linie
+                        0.5: "A#4",     // Zwischen A4 und C5
+                        0.6: "B4",      // Zwischen A4 und C5
+                        0.7: "C5",      // Dritte Linie
+                        0.8: "C#5",     // Zwischen C5 und E5
+                        0.9: "D5",      // Zwischen C5 und E5
+                        1.0: "D#5",     // Zwischen C5 und E5
+                        1.1: "E5",      // Vierte Linie
+                        1.2: "F5",      // Zwischen E5 und G5
+                        1.3: "F#5",     // Zwischen E5 und G5
+                        1.4: "G5"       // Fünfte Linie
+                    };
+
+                    let closestPosition = 0;
+                    let minDistance = Number.MAX_VALUE;
+
+                    for (let pos in notePositions) {
+                        const distance = Math.abs(clampedY - pos);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestPosition = pos;
+                        }
+                    }
+
+                    selectedNote.pitch = notePositions[closestPosition];
+
+                    // Track neu sortieren
+                    this.tracks[this.currentTrack].sort((a, b) => a.position.x - b.position.x);
+                }
+            }
+        };
+
+        // Maus loslassen-Handler
+        this.scene.onPointerUp = () => {
+            isDragging = false;
+            selectedNote = null;
+        };
+
+        // Bestehende Event-Listener
         document.getElementById("playButton").onclick = () => {
             console.log("Play button clicked");
             this.playTrack(this.currentTrack);
@@ -519,6 +646,7 @@ class MusicScoreEditor {
             console.log("Stop button clicked");
             this.stopPlayback();
         };
+
         document.getElementById("tempoSlider").oninput = (e) => {
             this.tempo = e.target.value;
             Tone.Transport.bpm.value = this.tempo;
@@ -526,6 +654,7 @@ class MusicScoreEditor {
         };
 
         document.getElementById("exportMidi").onclick = () => this.exportToMidi();
+
         document.getElementById("importMidi").onchange = (e) => {
             const file = e.target.files[0];
             if (file) {
@@ -550,6 +679,10 @@ class MusicScoreEditor {
 
 // Editor initialisieren
 const editor = new MusicScoreEditor();
+
+
+
+
 
 
 
