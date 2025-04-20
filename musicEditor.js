@@ -681,16 +681,11 @@ class MusicScoreEditor {
             this.loadSongWithDialog();
         };
 
-        // Optional: Behalte auch den ursprünglichen loadSong Input für Drag & Drop
         document.getElementById("loadSong").onchange = (e) => {
             const file = e.target.files[0];
             if (file) {
                 this.loadSong(file);
             }
-        };
-
-        document.getElementById("importDuration").onchange = (e) => {
-            this.setMaxImportDuration(parseFloat(e.target.value));
         };
 
         // Render Loop
@@ -706,6 +701,7 @@ class MusicScoreEditor {
 
 // Editor initialisieren
 const editor = new MusicScoreEditor();
+
 
 
 
