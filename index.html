@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Music Score Editor</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="controls">
+        <button id="playButton">Play</button>
+        <button id="stopButton">Stop</button>
+        <input type="range" id="tempoSlider" min="60" max="200" value="120">
+        <span id="tempoValue">120 BPM</span>
+        <button id="exportMidi">Export MIDI</button>
+        <input type="file" id="importMidi" accept=".mid">
+    </div>
+    <canvas id="renderCanvas"></canvas>
+    <script src="musicEditor.js"></script>
+</body>
+</html>
