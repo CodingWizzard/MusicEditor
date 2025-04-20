@@ -330,81 +330,101 @@ class MusicScoreEditor {
         this.updatePlaybackLine(this.playbackStartPosition);
     }
 
-    exportToMidi() {
-        // Erstelle neue MIDI-Datei
-        const midi = new Midi();
-
-        // Füge einen Track hinzu
-        const track = midi.addTrack();
-
-        // Setze Tempo
-        midi.header.setTempo(this.tempo);
-
-        // Konvertiere X-Position zu Ticks
-        const xToTicks = (x) => {
-            const normalizedPosition = (x - this.playbackStartPosition) /
-                (this.playbackEndPosition - this.playbackStartPosition);
-            return Math.round(normalizedPosition * midi.header.ticksPerBeat * 4); // 4 Beats pro Takt
+    saveSong() {
+        const songData = {
+            tempo: this.tempo,
+            tracks: this.tracks.map(track =>
+                track.map(note => ({
+                    pitch: note.pitch,
+                    duration: note.duration,
+                    position: {
+                        x: note.position.x,
+                        y: note.position.y,
+                        z: note.position.z
+                    }
+                }))
+            )
         };
 
-        // Konvertiere Y-Position zu MIDI Note
-        const yToMidiNote = (y) => {
-            const noteMapping = {
-                0.0: 65,    // F4
-                0.1: 66,    // F#4
-                0.2: 67,    // G4
-                0.3: 68,    // G#4
-                0.4: 69,    // A4
-                0.5: 70,    // A#4
-                0.6: 71,    // B4
-                0.7: 72,    // C5
-                0.8: 73,    // C#5
-                0.9: 74,    // D5
-                1.0: 75,    // D#5
-                1.1: 76,    // E5
-                1.2: 77,    // F5
-                1.3: 78,    // F#5
-                1.4: 79     // G5
-            };
-
-            let closestY = 0.7; // Default to C5
-            let minDistance = Number.MAX_VALUE;
-
-            for (const pos in noteMapping) {
-                const distance = Math.abs(y - pos);
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    closestY = pos;
-                }
-            }
-
-            return noteMapping[closestY];
-        };
-
-        // Füge alle Noten zum Track hinzu
-        this.tracks[this.currentTrack].forEach(note => {
-            const ticks = xToTicks(note.position.x);
-            const midiNote = yToMidiNote(note.position.y);
-            const duration = 480; // Standard-Länge (ein Beat)
-
-            track.addNote({
-                midi: midiNote,
-                time: ticks / midi.header.ticksPerBeat,
-                duration: 0.5, // Halbe Note
-                velocity: 64 // Standard-Lautstärke
-            });
-        });
-
-        // Exportiere als Blob und erstelle Download
-        const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
+        // Erstelle und downloade die JSON-Datei
+        const blob = new Blob([JSON.stringify(songData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'score.mid';
+        a.download = 'song.json';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    loadSongWithDialog() {
+        // Erstelle einen temporären Datei-Input
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json';
+
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                this.loadSong(file);
+            }
+        };
+
+        // Trigger Dateiauswahl-Dialog
+        fileInput.click();
+    }
+
+    loadSong(file) {
+        const reader = new FileReader();
+
+        reader.onload = (e) => {
+            try {
+                const songData = JSON.parse(e.target.result);
+
+                // Lösche alle existierenden Noten
+                this.tracks.forEach(track => {
+                    track.forEach(note => {
+                        if (note.mesh) {
+                            note.mesh.dispose();
+                        }
+                    });
+                });
+
+                // Setze Tempo
+                this.tempo = songData.tempo;
+                document.getElementById("tempoSlider").value = this.tempo;
+                document.getElementById("tempoValue").textContent = `${this.tempo} BPM`;
+                Tone.Transport.bpm.value = this.tempo;
+
+                // Erstelle neue Tracks
+                this.tracks = songData.tracks.map(track =>
+                    track.map(noteData => {
+                        const position = new BABYLON.Vector3(
+                            noteData.position.x,
+                            noteData.position.y,
+                            noteData.position.z
+                        );
+                        const note = this.createNote(position);
+                        note.pitch = noteData.pitch;
+                        note.duration = noteData.duration;
+                        return note;
+                    })
+                );
+
+                console.log("Song loaded successfully");
+            } catch (error) {
+                console.error("Error loading song:", error);
+                alert("Error loading song file. Please check if it's a valid song file.");
+            }
+        };
+
+        reader.onerror = (error) => {
+            console.error("Error reading file:", error);
+            alert("Error reading file. Please try again.");
+        };
+
+        reader.readAsText(file);
     }
 
     importFromMidi(file) {
@@ -653,12 +673,19 @@ class MusicScoreEditor {
             document.getElementById("tempoValue").textContent = `${this.tempo} BPM`;
         };
 
-        document.getElementById("exportMidi").onclick = () => this.exportToMidi();
+        document.getElementById("saveSong").onclick = () => {
+            this.saveSong();
+        };
 
-        document.getElementById("importMidi").onchange = (e) => {
+        document.getElementById("loadSongDialog").onclick = () => {
+            this.loadSongWithDialog();
+        };
+
+        // Optional: Behalte auch den ursprünglichen loadSong Input für Drag & Drop
+        document.getElementById("loadSong").onchange = (e) => {
             const file = e.target.files[0];
             if (file) {
-                this.importFromMidi(file);
+                this.loadSong(file);
             }
         };
 
@@ -679,6 +706,8 @@ class MusicScoreEditor {
 
 // Editor initialisieren
 const editor = new MusicScoreEditor();
+
+
 
 
 
